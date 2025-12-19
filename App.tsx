@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key, Save, Clock } from 'lucide-react';
+import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key, Save, Clock, Sparkles } from 'lucide-react';
 import { ViewMode, GoogleDriveFile } from './types';
-import { fetchDriveFilesViaGemini, getDriveImageUrl, extractFolderId } from './services/driveService';
+import { fetchDriveFilesViaGemini, getDriveImageUrl, extractFolderId, validateApiKey } from './services/driveService';
 
 // --- Sub-component: PhotoCard ---
 interface PhotoCardProps {
@@ -56,8 +56,9 @@ const App: React.FC = () => {
   // API Key State
   const [userApiKey, setUserApiKey] = useState<string>('');
   const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
+  const [isValidating, setIsValidating] = useState<boolean>(false);
+  const [validationMsg, setValidationMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
-  // Load Key from LocalStorage on mount
   useEffect(() => {
     const savedKey = localStorage.getItem('user_gemini_api_key');
     if (savedKey) setUserApiKey(savedKey);
@@ -66,17 +67,45 @@ const App: React.FC = () => {
     if (savedSelected) setSelectedFiles(JSON.parse(savedSelected));
   }, []);
 
-  // Save selection
   useEffect(() => {
     localStorage.setItem('selected_filenames', JSON.stringify(selectedFiles));
   }, [selectedFiles]);
 
-  const saveApiKey = (key: string) => {
-    const cleanKey = key.trim();
-    localStorage.setItem('user_gemini_api_key', cleanKey);
-    setUserApiKey(cleanKey);
-    setShowKeyModal(false);
-    setError(null);
+  const handleValidateAndSave = async () => {
+    if (!userApiKey || userApiKey.length < 10) {
+      setValidationMsg({ type: 'error', text: 'Vui lòng nhập mã Key hợp lệ.' });
+      return;
+    }
+
+    setIsValidating(true);
+    setValidationMsg(null);
+    
+    try {
+      await validateApiKey(userApiKey);
+      setValidationMsg({ type: 'success', text: 'Xác thực thành công! Key hợp lệ và có thể sử dụng.' });
+      
+      // Lưu vào localStorage sau khi xác thực thành công
+      localStorage.setItem('user_gemini_api_key', userApiKey.trim());
+      
+      // Đóng modal sau 1.5 giây để người dùng kịp đọc thông báo
+      setTimeout(() => {
+        setShowKeyModal(false);
+        setValidationMsg(null);
+        setError(null);
+      }, 1500);
+      
+    } catch (err: any) {
+      const msg = err.message || "";
+      if (msg.includes("API_KEY_INVALID")) {
+        setValidationMsg({ type: 'error', text: 'API Key không chính xác. Vui lòng kiểm tra lại.' });
+      } else if (msg.includes("429")) {
+        setValidationMsg({ type: 'error', text: 'Key hợp lệ nhưng đang bị giới hạn (Rate limit). Thử lại sau 1 phút.' });
+      } else {
+        setValidationMsg({ type: 'error', text: 'Không thể kết nối với Gemini. Vui lòng kiểm tra mạng hoặc Key.' });
+      }
+    } finally {
+      setIsValidating(false);
+    }
   };
 
   const handleLoadFiles = async (input: string) => {
@@ -96,8 +125,6 @@ const App: React.FC = () => {
       window.location.hash = id;
     } catch (err: any) {
       const msg = err.message || "";
-      console.error("API Error:", err);
-
       if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
         setError(
           <div className="space-y-3">
@@ -105,21 +132,13 @@ const App: React.FC = () => {
               <Clock className="w-4 h-4" /> Hết lượt sử dụng (Quota Exceeded)
             </p>
             <p className="text-xs opacity-90 leading-relaxed">
-              Bạn đang dùng gói API miễn phí và đã vượt quá giới hạn yêu cầu/phút. 
-              Vui lòng **đợi khoảng 1-2 phút** rồi thử lại, hoặc nâng cấp lên gói trả phí trong Google AI Studio.
+              Bạn đang dùng gói API miễn phí và đã vượt quá giới hạn yêu cầu/phút. Vui lòng đợi khoảng 1-2 phút rồi thử lại.
             </p>
-            <div className="flex gap-3 pt-1">
-              <a href="https://aistudio.google.com/app/plan_management" target="_blank" className="text-[10px] bg-white/10 px-2 py-1 rounded hover:bg-white/20 transition-all font-bold">
-                Kiểm tra hạn mức
-              </a>
-            </div>
           </div>
         );
       } else if (msg.includes("API KEY")) {
-        setError("Vui lòng nhập API Key để ứng dụng có thể quét ảnh từ Drive.");
+        setError("Vui lòng nhập và xác thực API Key để ứng dụng hoạt động.");
         setShowKeyModal(true);
-      } else if (msg.includes("403")) {
-        setError("Lỗi 403: API Key của bạn cần được bật thanh toán (Billing) trên Google Cloud Console.");
       } else {
         setError(msg);
       }
@@ -155,35 +174,58 @@ const App: React.FC = () => {
               <div className="bg-indigo-600/20 p-3 rounded-2xl">
                 <Key className="w-6 h-6 text-indigo-400" />
               </div>
-              <button onClick={() => setShowKeyModal(false)} className="text-slate-500 hover:text-white transition-colors">
+              <button onClick={() => { setShowKeyModal(false); setValidationMsg(null); }} className="text-slate-500 hover:text-white transition-colors">
                 <X className="w-6 h-6" />
               </button>
             </div>
             <div className="space-y-2">
               <h3 className="text-xl font-bold">Cấu hình API Key</h3>
-              <p className="text-sm text-slate-400">Nhập mã khóa Google Gemini để sử dụng tính năng quét Drive. Key được lưu an toàn tại trình duyệt của bạn.</p>
+              <p className="text-sm text-slate-400">Ứng dụng sử dụng Gemini AI miễn phí để quét thư mục. Mã khóa của bạn được bảo mật tại trình duyệt.</p>
             </div>
             <div className="space-y-4">
-              <input
-                type="password"
-                placeholder="Dán API Key của bạn tại đây..."
-                value={userApiKey}
-                onChange={(e) => setUserApiKey(e.target.value)}
-                className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-mono text-sm"
-              />
+              <div className="relative">
+                <input
+                  type="password"
+                  placeholder="Dán API Key của bạn tại đây..."
+                  value={userApiKey}
+                  onChange={(e) => { setUserApiKey(e.target.value); setValidationMsg(null); }}
+                  className={`w-full bg-slate-950 border rounded-xl px-4 py-3 outline-none focus:ring-2 transition-all font-mono text-sm ${
+                    validationMsg?.type === 'success' ? 'border-green-500/50 focus:ring-green-500' : 
+                    validationMsg?.type === 'error' ? 'border-red-500/50 focus:ring-red-500' : 'border-white/10 focus:ring-indigo-500'
+                  }`}
+                />
+                {isValidating && (
+                  <div className="absolute right-3 top-3">
+                    <Loader2 className="animate-spin w-5 h-5 text-indigo-500" />
+                  </div>
+                )}
+              </div>
+
+              {validationMsg && (
+                <div className={`text-xs p-3 rounded-lg flex items-center gap-2 animate-in slide-in-from-top-1 ${
+                  validationMsg.type === 'success' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
+                }`}>
+                  {validationMsg.type === 'success' ? <Sparkles className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                  {validationMsg.text}
+                </div>
+              )}
+
               <div className="flex flex-col gap-2">
                 <button 
-                  onClick={() => saveApiKey(userApiKey)}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                  onClick={handleValidateAndSave}
+                  disabled={isValidating}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
                 >
-                  <Save className="w-4 h-4" /> Lưu cấu hình
+                  {isValidating ? 'Đang xác thực...' : (
+                    <> <Check className="w-4 h-4" /> Xác thực & Lưu </>
+                  )}
                 </button>
                 <a 
                   href="https://aistudio.google.com/app/apikey" 
                   target="_blank" 
                   className="text-center text-xs text-indigo-400 hover:underline flex items-center justify-center gap-1"
                 >
-                  Lấy API Key miễn phí <ExternalLink className="w-3 h-3" />
+                  Lấy API Key Gemini miễn phí tại đây <ExternalLink className="w-3 h-3" />
                 </a>
               </div>
             </div>
@@ -219,9 +261,9 @@ const App: React.FC = () => {
                 <div className="p-6 bg-indigo-600/10 border border-indigo-500/20 rounded-3xl space-y-4 animate-in slide-in-from-top duration-500">
                   <div className="flex items-center justify-center gap-3 text-indigo-400">
                     <Info className="w-6 h-6" />
-                    <p className="font-bold">Ứng dụng cần API Key để hoạt động</p>
+                    <p className="font-bold">Chưa cấu thực API Key</p>
                   </div>
-                  <p className="text-sm text-slate-400">Vui lòng nhập API Key để chúng tôi có thể tự động quét và hiển thị hình ảnh từ thư mục Google Drive của bạn.</p>
+                  <p className="text-sm text-slate-400">Vui lòng nhập và xác thực API Key để bắt đầu sử dụng tính năng quét ảnh tự động.</p>
                   <button onClick={() => setShowKeyModal(true)} className="bg-indigo-600 px-6 py-2 rounded-xl font-bold hover:bg-indigo-500 transition-all">
                     Nhập API Key ngay
                   </button>
@@ -251,14 +293,6 @@ const App: React.FC = () => {
                        <div className="text-sm leading-relaxed opacity-90">{error}</div>
                     </div>
                   </div>
-                  {typeof error === 'string' && error.includes("403") && (
-                    <div className="pt-3 border-t border-red-500/10">
-                      <p className="text-xs text-slate-500 mb-2">Lưu ý: Bạn cần một API Key từ dự án Google Cloud đã được cấu hình thanh toán để sử dụng tính năng Search (dùng để quét thư mục).</p>
-                      <a href="https://console.cloud.google.com/billing" target="_blank" className="text-xs text-indigo-400 font-bold hover:underline flex items-center gap-1">
-                        Thiết lập Billing trên GCP <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                  )}
                 </div>
               )}
             </div>

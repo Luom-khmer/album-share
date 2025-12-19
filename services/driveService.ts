@@ -19,8 +19,26 @@ export const extractFolderId = (input: string): string => {
 };
 
 /**
+ * Kiểm tra xem API Key có hoạt động không bằng một yêu cầu tối giản.
+ */
+export const validateApiKey = async (apiKey: string): Promise<boolean> => {
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    // Gửi một yêu cầu rất ngắn để kiểm tra kết nối
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: "ping",
+      config: { maxOutputTokens: 1 }
+    });
+    return !!response.text;
+  } catch (error) {
+    console.error("Validation failed:", error);
+    throw error;
+  }
+};
+
+/**
  * Sử dụng Gemini 3 Flash để lấy danh sách file.
- * Chấp nhận apiKey truyền từ UI hoặc fallback về process.env.
  */
 export const fetchDriveFilesViaGemini = async (folderId: string, customApiKey?: string): Promise<{files: GoogleDriveFile[], sources: any[]}> => {
   const apiKey = customApiKey || process.env.API_KEY;
