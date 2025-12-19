@@ -1,0 +1,5 @@
+{
+  "name": "LensSelect - Photographer's Gallery Manager",
+  "description": "A streamlined tool for photographers to share public Google Drive galleries with clients. Features include client photo selection (hearting) and an admin view for exporting selected filenames.",
+  "requestFramePermissions": []
+}

@@ -1,0 +1,235 @@
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle } from 'lucide-react';
+import { ViewMode, GoogleDriveFile } from './types';
+import { fetchDriveFilesViaGemini, getDriveImageUrl, extractFolderId } from './services/driveService';
+
+// --- Sub-component: PhotoCard ---
+interface PhotoCardProps {
+  file: GoogleDriveFile;
+  isSelected: boolean;
+  onToggle: (fileName: string) => void;
+}
+
+const PhotoCard: React.FC<PhotoCardProps> = ({ file, isSelected, onToggle }) => {
+  return (
+    <div className="group relative aspect-[3/4] bg-slate-900 rounded-2xl overflow-hidden border border-white/5 hover:border-indigo-500/50 transition-all duration-500 shadow-lg">
+      <img
+        src={getDriveImageUrl(file.id)}
+        alt={file.name}
+        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+        loading="lazy"
+        onError={(e) => (e.currentTarget.src = 'https://via.placeholder.com/400x600?text=Private+Image')}
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
+        <span className="text-xs font-medium text-white/90 truncate drop-shadow-md">{file.name}</span>
+      </div>
+      <button
+        onClick={() => onToggle(file.name)}
+        className={`absolute top-3 right-3 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 backdrop-blur-md shadow-xl ${
+          isSelected 
+            ? 'bg-red-500 text-white scale-110 shadow-red-500/20' 
+            : 'bg-black/40 text-white/70 hover:bg-white hover:text-slate-900 opacity-0 group-hover:opacity-100'
+        }`}
+      >
+        <Heart className={`w-5 h-5 ${isSelected ? 'fill-current' : ''}`} />
+      </button>
+      {isSelected && (
+        <div className="absolute top-3 left-3 bg-indigo-600 text-white p-1.5 rounded-lg shadow-lg animate-in zoom-in-75">
+          <Check className="w-4 h-4" />
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- Main Component: App ---
+const App: React.FC = () => {
+  const [viewMode, setViewMode] = useState<ViewMode>('client');
+  const [folderIdInput, setFolderIdInput] = useState<string>('');
+  const [files, setFiles] = useState<GoogleDriveFile[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
+  const [copied, setCopied] = useState<boolean>(false);
+  const [isKeySelected, setIsKeySelected] = useState<boolean>(true);
+
+  useEffect(() => {
+    const checkKey = async () => {
+      // @ts-ignore
+      const hasKey = await window.aistudio.hasSelectedApiKey();
+      setIsKeySelected(hasKey);
+    };
+    checkKey();
+  }, []);
+
+  const handleOpenSelectKey = async () => {
+    // @ts-ignore
+    await window.aistudio.openSelectKey();
+    setIsKeySelected(true);
+  };
+
+  useEffect(() => {
+    const saved = localStorage.getItem('selected_filenames');
+    if (saved) setSelectedFiles(JSON.parse(saved));
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('selected_filenames', JSON.stringify(selectedFiles));
+  }, [selectedFiles]);
+
+  const handleLoadFiles = async (input: string) => {
+    const id = extractFolderId(input);
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { files: driveFiles } = await fetchDriveFilesViaGemini(id);
+      setFiles(driveFiles);
+      window.location.hash = id;
+      if (driveFiles.length === 0) setError("Không tìm thấy ảnh. Hãy chắc chắn thư mục đã được bật 'Bất kỳ ai có liên kết đều có thể xem'.");
+    } catch (err: any) {
+      if (err.message?.includes("PERMISSION_DENIED")) {
+        setError("Lỗi 403: API Key của bạn chưa bật Thanh toán (Billing). Vui lòng nhấn 'Cấu hình thanh toán' trong Google Cloud Console.");
+      } else {
+        setError("Lỗi: " + (err.message || "Không thể truy cập thư mục."));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleSelect = useCallback((fileName: string) => {
+    setSelectedFiles(prev => 
+      prev.includes(fileName) ? prev.filter(f => f !== fileName) : [...prev, fileName]
+    );
+  }, []);
+
+  const copyForPhotographer = () => {
+    const formatted = selectedFiles
+      .map(name => name.split('.').slice(0, -1).join('.'))
+      .join(', ');
+    navigator.clipboard.writeText(formatted);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  if (!isKeySelected) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
+        <div className="max-w-md space-y-6">
+          <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-indigo-600/20 rotate-12">
+            <Camera className="w-10 h-10 text-white" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-3xl font-black">LensSelect</h2>
+            <p className="text-slate-400">Vui lòng chọn API Key từ một dự án đã bật Billing để bắt đầu.</p>
+          </div>
+          <button onClick={handleOpenSelectKey} className="w-full bg-white text-slate-950 font-black py-4 rounded-2xl hover:bg-slate-200 transition-all">
+            Kết nối Google AI Studio
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500/30">
+      <header className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-xl border-b border-white/5 px-4 h-16 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Camera className="text-indigo-500 w-6 h-6" />
+          <h1 className="text-lg font-bold hidden sm:block">LensSelect</h1>
+        </div>
+        <nav className="flex items-center gap-1 bg-white/5 p-1 rounded-full border border-white/10">
+          <button onClick={() => setViewMode('client')} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${viewMode === 'client' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Khách hàng</button>
+          <button onClick={() => setViewMode('admin')} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${viewMode === 'admin' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Thợ ảnh</button>
+        </nav>
+        <div className="w-10 h-10" />
+      </header>
+
+      <main className="container mx-auto px-4 py-8 max-w-7xl flex-1 mb-24">
+        {viewMode === 'client' ? (
+          <div className="space-y-12">
+            <div className="max-w-xl mx-auto text-center space-y-6">
+              <h2 className="text-4xl font-black tracking-tight">Thư viện của bạn</h2>
+              <div className="relative group">
+                <input
+                  type="text"
+                  value={folderIdInput}
+                  onChange={(e) => setFolderIdInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLoadFiles(folderIdInput)}
+                  placeholder="Dán link thư mục Google Drive..."
+                  className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                />
+                <button onClick={() => handleLoadFiles(folderIdInput)} className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center">
+                  {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <ArrowRight className="w-5 h-5" />}
+                </button>
+              </div>
+              
+              {error && (
+                <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl text-left space-y-4">
+                  <div className="flex gap-3 text-red-400">
+                    <AlertTriangle className="w-6 h-6 shrink-0" />
+                    <p className="text-sm leading-relaxed font-medium">{error}</p>
+                  </div>
+                  {error.includes("403") && (
+                    <div className="pt-2 border-t border-red-500/10 space-y-3">
+                      <p className="text-xs text-slate-500">Bạn cần nhấn vào nút "Configurer la facturation" (như trong ảnh bạn gửi) trên Google Cloud Console để kích hoạt tính năng Search của Gemini.</p>
+                      <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" className="inline-flex items-center gap-2 text-xs font-bold text-indigo-400 hover:underline">
+                        Đi tới Google Cloud Console <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {files.map((file) => (
+                <PhotoCard key={file.id} file={file} isSelected={selectedFiles.includes(file.name)} onToggle={toggleSelect} />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="max-w-3xl mx-auto space-y-8">
+            <div className="flex justify-between items-end">
+              <div>
+                <h2 className="text-3xl font-black">Danh sách chọn</h2>
+                <p className="text-slate-400">Đã chọn {selectedFiles.length} ảnh.</p>
+              </div>
+              <button onClick={copyForPhotographer} className="bg-indigo-600 px-6 py-3 rounded-xl font-bold flex items-center gap-2">
+                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                {copied ? "Đã copy!" : "Copy cho thợ ảnh"}
+              </button>
+            </div>
+            <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 min-h-[300px]">
+              {selectedFiles.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {selectedFiles.map((name, i) => (
+                    <div key={i} className="bg-white/5 p-3 rounded-lg flex justify-between items-center group">
+                      <span className="text-sm truncate">{name}</span>
+                      <button onClick={() => toggleSelect(name)} className="text-slate-500 hover:text-red-500"><X className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-600 italic">Chưa có ảnh nào được chọn.</div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {viewMode === 'client' && selectedFiles.length > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4">
+          <button onClick={() => setViewMode('admin')} className="w-full bg-indigo-600 py-4 rounded-2xl shadow-2xl font-black flex items-center justify-between px-8 border border-white/10">
+            <span>Đã chọn {selectedFiles.length} ảnh</span>
+            <div className="flex items-center gap-2">Xem danh sách <ArrowRight className="w-4 h-4" /></div>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
