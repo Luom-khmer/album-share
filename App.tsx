@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key, Save, Clock, Sparkles } from 'lucide-react';
+import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key, Save, Clock, Sparkles, RefreshCw } from 'lucide-react';
 import { ViewMode, GoogleDriveFile } from './types';
 import { fetchDriveFilesViaGemini, getDriveImageUrl, extractFolderId, validateApiKey } from './services/driveService';
 
@@ -84,10 +84,8 @@ const App: React.FC = () => {
       await validateApiKey(userApiKey);
       setValidationMsg({ type: 'success', text: 'Xác thực thành công! Key hợp lệ và có thể sử dụng.' });
       
-      // Lưu vào localStorage sau khi xác thực thành công
       localStorage.setItem('user_gemini_api_key', userApiKey.trim());
       
-      // Đóng modal sau 1.5 giây để người dùng kịp đọc thông báo
       setTimeout(() => {
         setShowKeyModal(false);
         setValidationMsg(null);
@@ -96,12 +94,10 @@ const App: React.FC = () => {
       
     } catch (err: any) {
       const msg = err.message || "";
-      if (msg.includes("API_KEY_INVALID")) {
-        setValidationMsg({ type: 'error', text: 'API Key không chính xác. Vui lòng kiểm tra lại.' });
-      } else if (msg.includes("429")) {
-        setValidationMsg({ type: 'error', text: 'Key hợp lệ nhưng đang bị giới hạn (Rate limit). Thử lại sau 1 phút.' });
+      if (msg.includes("429")) {
+        setValidationMsg({ type: 'error', text: 'Key đúng nhưng đang bị nghẽn (429). Hãy đợi 1 phút rồi nhấn lại.' });
       } else {
-        setValidationMsg({ type: 'error', text: 'Không thể kết nối với Gemini. Vui lòng kiểm tra mạng hoặc Key.' });
+        setValidationMsg({ type: 'error', text: 'API Key không hợp lệ hoặc không có quyền truy cập.' });
       }
     } finally {
       setIsValidating(false);
@@ -125,22 +121,36 @@ const App: React.FC = () => {
       window.location.hash = id;
     } catch (err: any) {
       const msg = err.message || "";
+      console.error("Fetch Error:", err);
+
       if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
         setError(
-          <div className="space-y-3">
-            <p className="font-bold text-red-400 flex items-center gap-2">
-              <Clock className="w-4 h-4" /> Hết lượt sử dụng (Quota Exceeded)
-            </p>
-            <p className="text-xs opacity-90 leading-relaxed">
-              Bạn đang dùng gói API miễn phí và đã vượt quá giới hạn yêu cầu/phút. Vui lòng đợi khoảng 1-2 phút rồi thử lại.
-            </p>
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-amber-400 font-bold">
+              <Clock className="w-5 h-5" />
+              <span>Hệ thống đang tạm nghỉ (Lỗi 429)</span>
+            </div>
+            <div className="text-sm space-y-2 opacity-90 leading-relaxed">
+              <p>Mặc dù bạn vẫn còn lượt chat, nhưng tính năng <b>"Tìm kiếm & Quét link"</b> của Google Gemini gói miễn phí có hạn mức rất thấp.</p>
+              <ul className="list-disc pl-5 space-y-1 text-xs text-slate-400">
+                <li>Hãy đợi chính xác <b>60 giây</b> trước khi thử lại.</li>
+                <li>Tránh nhấn nút "Quét" liên tục.</li>
+                <li>Đảm bảo thư mục Drive của bạn đã được đặt ở chế độ <b>"Bất kỳ ai có liên kết đều có thể xem"</b>.</li>
+              </ul>
+            </div>
+            <button 
+              onClick={() => handleLoadFiles(folderIdInput)}
+              className="flex items-center gap-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 px-4 py-2 rounded-xl text-xs font-bold transition-all"
+            >
+              <RefreshCw className="w-3 h-3" /> Thử lại sau khi đợi
+            </button>
           </div>
         );
       } else if (msg.includes("API KEY")) {
         setError("Vui lòng nhập và xác thực API Key để ứng dụng hoạt động.");
         setShowKeyModal(true);
       } else {
-        setError(msg);
+        setError(<p className="text-sm">{msg}</p>);
       }
     } finally {
       setLoading(false);
@@ -180,13 +190,13 @@ const App: React.FC = () => {
             </div>
             <div className="space-y-2">
               <h3 className="text-xl font-bold">Cấu hình API Key</h3>
-              <p className="text-sm text-slate-400">Ứng dụng sử dụng Gemini AI miễn phí để quét thư mục. Mã khóa của bạn được bảo mật tại trình duyệt.</p>
+              <p className="text-sm text-slate-400">Dán mã API Key của bạn để kích hoạt AI quét thư mục. Mã được lưu tại máy khách.</p>
             </div>
             <div className="space-y-4">
               <div className="relative">
                 <input
                   type="password"
-                  placeholder="Dán API Key của bạn tại đây..."
+                  placeholder="Dán API Key..."
                   value={userApiKey}
                   onChange={(e) => { setUserApiKey(e.target.value); setValidationMsg(null); }}
                   className={`w-full bg-slate-950 border rounded-xl px-4 py-3 outline-none focus:ring-2 transition-all font-mono text-sm ${
@@ -216,7 +226,7 @@ const App: React.FC = () => {
                   disabled={isValidating}
                   className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
                 >
-                  {isValidating ? 'Đang xác thực...' : (
+                  {isValidating ? 'Đang kiểm tra...' : (
                     <> <Check className="w-4 h-4" /> Xác thực & Lưu </>
                   )}
                 </button>
@@ -225,7 +235,7 @@ const App: React.FC = () => {
                   target="_blank" 
                   className="text-center text-xs text-indigo-400 hover:underline flex items-center justify-center gap-1"
                 >
-                  Lấy API Key Gemini miễn phí tại đây <ExternalLink className="w-3 h-3" />
+                  Lấy API Key miễn phí tại đây <ExternalLink className="w-3 h-3" />
                 </a>
               </div>
             </div>
@@ -279,18 +289,24 @@ const App: React.FC = () => {
                   placeholder="Dán link thư mục Google Drive..."
                   className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-white placeholder:text-slate-600"
                 />
-                <button onClick={() => handleLoadFiles(folderIdInput)} className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center hover:bg-indigo-500 transition-colors shadow-lg">
+                <button 
+                  onClick={() => handleLoadFiles(folderIdInput)} 
+                  disabled={loading}
+                  className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center hover:bg-indigo-500 transition-colors shadow-lg disabled:opacity-50"
+                >
                   {loading ? <Loader2 className="animate-spin w-5 h-5 text-white" /> : <ArrowRight className="w-5 h-5 text-white" />}
                 </button>
               </div>
               
               {error && (
-                <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl text-left space-y-4 animate-in fade-in zoom-in-95">
-                  <div className="flex gap-3 text-red-400">
-                    <AlertTriangle className="w-6 h-6 shrink-0" />
+                <div className="p-6 bg-slate-900/50 border border-white/10 rounded-2xl text-left space-y-4 animate-in fade-in zoom-in-95 backdrop-blur-md shadow-2xl">
+                  <div className="flex gap-4">
+                    <div className="bg-red-500/20 p-2 rounded-lg h-fit">
+                      <AlertTriangle className="w-5 h-5 text-red-400" />
+                    </div>
                     <div className="flex-1">
-                       <p className="text-sm font-bold mb-1">Cần chú ý:</p>
-                       <div className="text-sm leading-relaxed opacity-90">{error}</div>
+                       <p className="text-sm font-bold mb-2">Cảnh báo hệ thống:</p>
+                       <div className="text-slate-200">{error}</div>
                     </div>
                   </div>
                 </div>
@@ -306,7 +322,7 @@ const App: React.FC = () => {
             {!loading && files.length === 0 && !error && (
               <div className="flex flex-col items-center justify-center py-20 text-slate-700">
                 <Share2 className="w-16 h-16 mb-4 opacity-10" />
-                <p className="font-medium">Nhập Link Google Drive để bắt đầu chọn ảnh</p>
+                <p className="font-medium text-slate-500 text-sm">Nhập Link Google Drive để bắt đầu chọn ảnh</p>
               </div>
             )}
           </div>
@@ -315,12 +331,13 @@ const App: React.FC = () => {
             <div className="flex justify-between items-end">
               <div>
                 <h2 className="text-3xl font-black">Danh sách chọn</h2>
-                <p className="text-slate-400">Đã chọn {selectedFiles.length} ảnh.</p>
+                <p className="text-slate-400 text-sm">Đã chọn {selectedFiles.length} ảnh.</p>
               </div>
               <div className="flex gap-2">
                 <button 
                   onClick={() => window.confirm("Xóa toàn bộ danh sách?") && setSelectedFiles([])}
                   className="bg-white/5 border border-white/10 px-4 py-3 rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-all"
+                  title="Xóa tất cả"
                 >
                   <Trash2 className="w-5 h-5" />
                 </button>
@@ -354,7 +371,7 @@ const App: React.FC = () => {
       {viewMode === 'client' && selectedFiles.length > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-50">
           <button onClick={() => setViewMode('admin')} className="w-full bg-indigo-600 py-4 rounded-2xl shadow-2xl font-black flex items-center justify-between px-8 border border-white/10 hover:bg-indigo-500 transition-all active:scale-95 text-white">
-            <span className="text-white">Đã chọn {selectedFiles.length} ảnh</span>
+            <span className="text-white font-bold">Đã chọn {selectedFiles.length} ảnh</span>
             <div className="flex items-center gap-2 text-white">Xem danh sách <ArrowRight className="w-4 h-4" /></div>
           </button>
         </div>
