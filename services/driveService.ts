@@ -1,5 +1,4 @@
 
-import { GoogleGenAI } from "@google/genai";
 import { GoogleDriveFile } from '../types';
 
 /**
@@ -19,61 +18,43 @@ export const extractFolderId = (input: string): string => {
 };
 
 /**
- * Kiểm tra xem API Key có hoạt động không bằng một yêu cầu tối giản.
+ * Lấy danh sách file trực tiếp từ Google Drive API v3.
+ * Cách này cực kỳ nhanh, ổn định và không bị giới hạn bởi AI Search.
+ * Yêu cầu: Folder phải được đặt ở chế độ "Bất kỳ ai có liên kết đều có thể xem".
  */
-export const validateApiKey = async (apiKey: string): Promise<boolean> => {
+export const fetchDriveFiles = async (folderId: string): Promise<GoogleDriveFile[]> => {
+  const apiKey = process.env.API_KEY;
+  const cleanId = extractFolderId(folderId);
+
+  if (!apiKey || apiKey === "undefined") {
+    throw new Error("Hệ thống chưa cấu hình API Key. Vui lòng kiểm tra môi trường.");
+  }
+
+  // Sử dụng endpoint chuẩn của Google Drive API v3 để liệt kê file trong thư mục
+  const url = `https://www.googleapis.com/drive/v3/files?q='${cleanId}'+in+parents+and+mimeType+contains+'image/'&key=${apiKey}&fields=files(id,name,mimeType)&pageSize=1000`;
+
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    // Gửi một yêu cầu rất ngắn để kiểm tra kết nối
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: "ping",
-      config: { maxOutputTokens: 1 }
-    });
-    return !!response.text;
-  } catch (error) {
-    console.error("Validation failed:", error);
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.error) {
+      if (data.error.status === "PERMISSION_DENIED") {
+        throw new Error("Thư mục này chưa được công khai. Hãy đặt chế độ 'Bất kỳ ai có liên kết đều có thể xem' trên Google Drive.");
+      }
+      throw new Error(data.error.message || "Không thể truy cập thư mục này.");
+    }
+
+    if (!data.files || data.files.length === 0) {
+      return [];
+    }
+
+    return data.files.map((file: any) => ({
+      id: file.id,
+      name: file.name,
+      mimeType: file.mimeType
+    }));
+  } catch (error: any) {
+    console.error("Drive API Error:", error);
     throw error;
   }
-};
-
-/**
- * Sử dụng Gemini 3 Flash để lấy danh sách file.
- */
-export const fetchDriveFilesViaGemini = async (folderId: string, customApiKey?: string): Promise<{files: GoogleDriveFile[], sources: any[]}> => {
-  const apiKey = customApiKey || process.env.API_KEY;
-  
-  if (!apiKey || apiKey === "undefined" || apiKey.length < 10) {
-    throw new Error("THIẾU API KEY: Vui lòng nhập API Key của bạn trong phần cài đặt (biểu tượng chìa khóa).");
-  }
-
-  const cleanId = extractFolderId(folderId);
-  const ai = new GoogleGenAI({ apiKey: apiKey });
-  
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `Hãy truy cập thư mục Google Drive công khai này: https://drive.google.com/drive/folders/${cleanId} 
-    và liệt kê tên file cùng ID của tất cả ảnh bên trong. 
-    Định dạng trả về chính xác: ID: [file_id], Name: [file_name].`,
-    config: {
-      tools: [{ googleSearch: {} }],
-      temperature: 0.1,
-    },
-  });
-
-  const text = response.text || "";
-  const files: GoogleDriveFile[] = [];
-  
-  const regex = /ID:\s*([a-zA-Z0-9_-]{25,})[\s,]+Name:\s*([^\n\r]+)/gi;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    files.push({
-      id: match[1].trim(),
-      name: match[2].trim(),
-      mimeType: 'image/jpeg'
-    });
-  }
-
-  const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-  return { files, sources };
 };

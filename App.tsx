@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key, Save, Clock, Sparkles, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Camera, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, ExternalLink, AlertTriangle, Key, Clock, Sparkles, RefreshCw, Grid, Layout } from 'lucide-react';
 import { ViewMode, GoogleDriveFile } from './types';
-import { fetchDriveFilesViaGemini, getDriveImageUrl, extractFolderId, validateApiKey } from './services/driveService';
+import { fetchDriveFiles, getDriveImageUrl, extractFolderId } from './services/driveService';
 
 // --- Sub-component: PhotoCard ---
 interface PhotoCardProps {
@@ -12,16 +12,27 @@ interface PhotoCardProps {
 }
 
 const PhotoCard: React.FC<PhotoCardProps> = ({ file, isSelected, onToggle }) => {
+  const [imgLoaded, setImgLoaded] = useState(false);
+
   return (
     <div className="group relative aspect-[3/4] bg-slate-900 rounded-2xl overflow-hidden border border-white/5 hover:border-indigo-500/50 transition-all duration-500 shadow-lg">
+      {!imgLoaded && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-800 animate-pulse">
+          <Loader2 className="w-6 h-6 text-slate-600 animate-spin" />
+        </div>
+      )}
       <img
         src={getDriveImageUrl(file.id)}
         alt={file.name}
-        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+        className={`w-full h-full object-cover transition-all duration-700 group-hover:scale-110 ${imgLoaded ? 'opacity-100' : 'opacity-0'}`}
         loading="lazy"
-        onError={(e) => (e.currentTarget.src = 'https://via.placeholder.com/400x600?text=Private+Image')}
+        onLoad={() => setImgLoaded(true)}
+        onError={(e) => {
+          setImgLoaded(true);
+          (e.currentTarget.src = 'https://via.placeholder.com/400x600?text=Private+Image');
+        }}
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
+      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
         <span className="text-xs font-medium text-white/90 truncate drop-shadow-md font-sans">{file.name}</span>
       </div>
       <button
@@ -52,17 +63,8 @@ const App: React.FC = () => {
   const [error, setError] = useState<React.ReactNode | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [copied, setCopied] = useState<boolean>(false);
-  
-  // API Key State
-  const [userApiKey, setUserApiKey] = useState<string>('');
-  const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
-  const [isValidating, setIsValidating] = useState<boolean>(false);
-  const [validationMsg, setValidationMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   useEffect(() => {
-    const savedKey = localStorage.getItem('user_gemini_api_key');
-    if (savedKey) setUserApiKey(savedKey);
-    
     const savedSelected = localStorage.getItem('selected_filenames');
     if (savedSelected) setSelectedFiles(JSON.parse(savedSelected));
   }, []);
@@ -71,87 +73,35 @@ const App: React.FC = () => {
     localStorage.setItem('selected_filenames', JSON.stringify(selectedFiles));
   }, [selectedFiles]);
 
-  const handleValidateAndSave = async () => {
-    if (!userApiKey || userApiKey.length < 10) {
-      setValidationMsg({ type: 'error', text: 'Vui lòng nhập mã Key hợp lệ.' });
-      return;
-    }
-
-    setIsValidating(true);
-    setValidationMsg(null);
-    
-    try {
-      await validateApiKey(userApiKey);
-      setValidationMsg({ type: 'success', text: 'Xác thực thành công! Key hợp lệ và có thể sử dụng.' });
-      
-      localStorage.setItem('user_gemini_api_key', userApiKey.trim());
-      
-      setTimeout(() => {
-        setShowKeyModal(false);
-        setValidationMsg(null);
-        setError(null);
-      }, 1500);
-      
-    } catch (err: any) {
-      const msg = err.message || "";
-      if (msg.includes("429")) {
-        setValidationMsg({ type: 'error', text: 'Key đúng nhưng đang bị nghẽn (429). Hãy đợi 1 phút rồi nhấn lại.' });
-      } else {
-        setValidationMsg({ type: 'error', text: 'API Key không hợp lệ hoặc không có quyền truy cập.' });
-      }
-    } finally {
-      setIsValidating(false);
-    }
-  };
-
   const handleLoadFiles = async (input: string) => {
     const id = extractFolderId(input);
     if (!id) return;
     
-    if (!userApiKey && !process.env.API_KEY) {
-      setShowKeyModal(true);
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {
-      const { files: driveFiles } = await fetchDriveFilesViaGemini(id, userApiKey);
+      const driveFiles = await fetchDriveFiles(id);
       setFiles(driveFiles);
       window.location.hash = id;
-    } catch (err: any) {
-      const msg = err.message || "";
-      console.error("Fetch Error:", err);
-
-      if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
-        setError(
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-amber-400 font-bold">
-              <Clock className="w-5 h-5" />
-              <span>Hệ thống đang tạm nghỉ (Lỗi 429)</span>
-            </div>
-            <div className="text-sm space-y-2 opacity-90 leading-relaxed">
-              <p>Mặc dù bạn vẫn còn lượt chat, nhưng tính năng <b>"Tìm kiếm & Quét link"</b> của Google Gemini gói miễn phí có hạn mức rất thấp.</p>
-              <ul className="list-disc pl-5 space-y-1 text-xs text-slate-400">
-                <li>Hãy đợi chính xác <b>60 giây</b> trước khi thử lại.</li>
-                <li>Tránh nhấn nút "Quét" liên tục.</li>
-                <li>Đảm bảo thư mục Drive của bạn đã được đặt ở chế độ <b>"Bất kỳ ai có liên kết đều có thể xem"</b>.</li>
-              </ul>
-            </div>
-            <button 
-              onClick={() => handleLoadFiles(folderIdInput)}
-              className="flex items-center gap-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 px-4 py-2 rounded-xl text-xs font-bold transition-all"
-            >
-              <RefreshCw className="w-3 h-3" /> Thử lại sau khi đợi
-            </button>
-          </div>
-        );
-      } else if (msg.includes("API KEY")) {
-        setError("Vui lòng nhập và xác thực API Key để ứng dụng hoạt động.");
-        setShowKeyModal(true);
-      } else {
-        setError(<p className="text-sm">{msg}</p>);
+      if (driveFiles.length === 0) {
+        setError("Không tìm thấy tệp ảnh nào trong thư mục này.");
       }
+    } catch (err: any) {
+      setError(
+        <div className="space-y-3">
+          <p className="font-bold text-red-400">Lỗi truy cập dữ liệu</p>
+          <p className="text-sm opacity-90">{err.message}</p>
+          <div className="bg-white/5 p-3 rounded-lg text-xs space-y-2 text-slate-400">
+            <p className="font-semibold text-slate-300">Cách khắc phục:</p>
+            <ol className="list-decimal pl-4 space-y-1">
+              <li>Mở thư mục trên Google Drive.</li>
+              <li>Nhấn <b>Chia sẻ (Share)</b>.</li>
+              <li>Chuyển quyền truy cập thành <b>Bất kỳ ai có liên kết (Anyone with the link)</b>.</li>
+              <li>Đảm bảo API Key của bạn đã được kích hoạt dịch vụ <b>"Google Drive API"</b> trong Cloud Console.</li>
+            </ol>
+          </div>
+        </div>
+      );
     } finally {
       setLoading(false);
     }
@@ -172,113 +122,28 @@ const App: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const isKeyReady = userApiKey || process.env.API_KEY;
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500/30">
-      {/* API Key Modal */}
-      {showKeyModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-slate-900 border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl space-y-6">
-            <div className="flex justify-between items-start">
-              <div className="bg-indigo-600/20 p-3 rounded-2xl">
-                <Key className="w-6 h-6 text-indigo-400" />
-              </div>
-              <button onClick={() => { setShowKeyModal(false); setValidationMsg(null); }} className="text-slate-500 hover:text-white transition-colors">
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-xl font-bold">Cấu hình API Key</h3>
-              <p className="text-sm text-slate-400">Dán mã API Key của bạn để kích hoạt AI quét thư mục. Mã được lưu tại máy khách.</p>
-            </div>
-            <div className="space-y-4">
-              <div className="relative">
-                <input
-                  type="password"
-                  placeholder="Dán API Key..."
-                  value={userApiKey}
-                  onChange={(e) => { setUserApiKey(e.target.value); setValidationMsg(null); }}
-                  className={`w-full bg-slate-950 border rounded-xl px-4 py-3 outline-none focus:ring-2 transition-all font-mono text-sm ${
-                    validationMsg?.type === 'success' ? 'border-green-500/50 focus:ring-green-500' : 
-                    validationMsg?.type === 'error' ? 'border-red-500/50 focus:ring-red-500' : 'border-white/10 focus:ring-indigo-500'
-                  }`}
-                />
-                {isValidating && (
-                  <div className="absolute right-3 top-3">
-                    <Loader2 className="animate-spin w-5 h-5 text-indigo-500" />
-                  </div>
-                )}
-              </div>
-
-              {validationMsg && (
-                <div className={`text-xs p-3 rounded-lg flex items-center gap-2 animate-in slide-in-from-top-1 ${
-                  validationMsg.type === 'success' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'
-                }`}>
-                  {validationMsg.type === 'success' ? <Sparkles className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
-                  {validationMsg.text}
-                </div>
-              )}
-
-              <div className="flex flex-col gap-2">
-                <button 
-                  onClick={handleValidateAndSave}
-                  disabled={isValidating}
-                  className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/50 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
-                >
-                  {isValidating ? 'Đang kiểm tra...' : (
-                    <> <Check className="w-4 h-4" /> Xác thực & Lưu </>
-                  )}
-                </button>
-                <a 
-                  href="https://aistudio.google.com/app/apikey" 
-                  target="_blank" 
-                  className="text-center text-xs text-indigo-400 hover:underline flex items-center justify-center gap-1"
-                >
-                  Lấy API Key miễn phí tại đây <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       <header className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-xl border-b border-white/5 px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Camera className="text-indigo-500 w-6 h-6" />
-          <h1 className="text-lg font-bold hidden sm:block">LensSelect</h1>
+          <h1 className="text-lg font-bold tracking-tight">LensSelect</h1>
         </div>
         <nav className="flex items-center gap-1 bg-white/5 p-1 rounded-full border border-white/10">
-          <button onClick={() => setViewMode('client')} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${viewMode === 'client' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Khách hàng</button>
-          <button onClick={() => setViewMode('admin')} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${viewMode === 'admin' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Thợ ảnh</button>
+          <button onClick={() => setViewMode('client')} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${viewMode === 'client' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Khách hàng</button>
+          <button onClick={() => setViewMode('admin')} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${viewMode === 'admin' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>Thợ ảnh</button>
         </nav>
-        <button 
-          onClick={() => setShowKeyModal(true)} 
-          className={`p-2 rounded-xl transition-all border ${userApiKey ? 'bg-indigo-600/10 border-indigo-500/30 text-indigo-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}
-          title="Thiết lập API Key"
-        >
-          <Key className="w-5 h-5" />
-        </button>
+        <div className="w-10"></div>
       </header>
 
       <main className="container mx-auto px-4 py-8 max-w-7xl flex-1 mb-24">
         {viewMode === 'client' ? (
           <div className="space-y-12">
             <div className="max-w-xl mx-auto text-center space-y-6">
-              <h2 className="text-4xl font-black tracking-tight font-sans">Thư viện của bạn</h2>
-              
-              {!isKeyReady && (
-                <div className="p-6 bg-indigo-600/10 border border-indigo-500/20 rounded-3xl space-y-4 animate-in slide-in-from-top duration-500">
-                  <div className="flex items-center justify-center gap-3 text-indigo-400">
-                    <Info className="w-6 h-6" />
-                    <p className="font-bold">Chưa cấu thực API Key</p>
-                  </div>
-                  <p className="text-sm text-slate-400">Vui lòng nhập và xác thực API Key để bắt đầu sử dụng tính năng quét ảnh tự động.</p>
-                  <button onClick={() => setShowKeyModal(true)} className="bg-indigo-600 px-6 py-2 rounded-xl font-bold hover:bg-indigo-500 transition-all">
-                    Nhập API Key ngay
-                  </button>
-                </div>
-              )}
+              <div className="space-y-2">
+                <h2 className="text-4xl font-black tracking-tight font-sans bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-500">Thư viện ảnh</h2>
+                <p className="text-slate-500 text-sm">Nhập mã thư mục để xem và chọn những tấm ảnh bạn ưng ý nhất.</p>
+              </div>
 
               <div className="relative group">
                 <input
@@ -286,81 +151,90 @@ const App: React.FC = () => {
                   value={folderIdInput}
                   onChange={(e) => setFolderIdInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleLoadFiles(folderIdInput)}
-                  placeholder="Dán link thư mục Google Drive..."
-                  className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-white placeholder:text-slate-600"
+                  placeholder="Dán link hoặc ID thư mục Google Drive..."
+                  className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-white placeholder:text-slate-600 shadow-2xl"
                 />
                 <button 
                   onClick={() => handleLoadFiles(folderIdInput)} 
                   disabled={loading}
-                  className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center hover:bg-indigo-500 transition-colors shadow-lg disabled:opacity-50"
+                  className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center hover:bg-indigo-500 transition-colors shadow-lg disabled:bg-slate-800 disabled:text-slate-500"
                 >
-                  {loading ? <Loader2 className="animate-spin w-5 h-5 text-white" /> : <ArrowRight className="w-5 h-5 text-white" />}
+                  {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <ArrowRight className="w-5 h-5" />}
                 </button>
               </div>
               
               {error && (
                 <div className="p-6 bg-slate-900/50 border border-white/10 rounded-2xl text-left space-y-4 animate-in fade-in zoom-in-95 backdrop-blur-md shadow-2xl">
                   <div className="flex gap-4">
-                    <div className="bg-red-500/20 p-2 rounded-lg h-fit">
-                      <AlertTriangle className="w-5 h-5 text-red-400" />
-                    </div>
-                    <div className="flex-1">
-                       <p className="text-sm font-bold mb-2">Cảnh báo hệ thống:</p>
-                       <div className="text-slate-200">{error}</div>
-                    </div>
+                    <div className="bg-red-500/20 p-2 rounded-lg h-fit"><AlertTriangle className="w-5 h-5 text-red-400" /></div>
+                    <div className="flex-1">{error}</div>
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {files.map((file) => (
-                <PhotoCard key={file.id} file={file} isSelected={selectedFiles.includes(file.name)} onToggle={toggleSelect} />
-              ))}
-            </div>
+            {files.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 md:gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                {files.map((file) => (
+                  <PhotoCard key={file.id} file={file} isSelected={selectedFiles.includes(file.name)} onToggle={toggleSelect} />
+                ))}
+              </div>
+            )}
 
             {!loading && files.length === 0 && !error && (
-              <div className="flex flex-col items-center justify-center py-20 text-slate-700">
-                <Share2 className="w-16 h-16 mb-4 opacity-10" />
-                <p className="font-medium text-slate-500 text-sm">Nhập Link Google Drive để bắt đầu chọn ảnh</p>
+              <div className="flex flex-col items-center justify-center py-32 text-slate-800">
+                <Grid className="w-20 h-20 mb-4 opacity-5" />
+                <p className="font-medium text-slate-600 text-sm">Chưa có ảnh nào được tải lên</p>
               </div>
             )}
           </div>
         ) : (
           <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-500">
-            <div className="flex justify-between items-end">
+            <div className="flex justify-between items-end bg-slate-900/50 p-6 rounded-3xl border border-white/5">
               <div>
                 <h2 className="text-3xl font-black">Danh sách chọn</h2>
-                <p className="text-slate-400 text-sm">Đã chọn {selectedFiles.length} ảnh.</p>
+                <p className="text-slate-500 text-sm">Khách hàng đã chọn {selectedFiles.length} tấm ảnh.</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-3">
                 <button 
-                  onClick={() => window.confirm("Xóa toàn bộ danh sách?") && setSelectedFiles([])}
-                  className="bg-white/5 border border-white/10 px-4 py-3 rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-all"
+                  onClick={() => window.confirm("Xóa toàn bộ danh sách đã chọn?") && setSelectedFiles([])} 
+                  className="bg-white/5 border border-white/10 w-12 h-12 flex items-center justify-center rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-all"
                   title="Xóa tất cả"
                 >
                   <Trash2 className="w-5 h-5" />
                 </button>
-                <button onClick={copyForPhotographer} className="bg-indigo-600 px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-600/20">
+                <button 
+                  onClick={copyForPhotographer} 
+                  disabled={selectedFiles.length === 0}
+                  className="bg-indigo-600 px-6 h-12 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-600/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   {copied ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4 text-white" />}
-                  <span className="text-white">{copied ? "Đã copy!" : "Copy cho thợ ảnh"}</span>
+                  <span className="text-white">{copied ? "Đã copy!" : "Copy mã ảnh"}</span>
                 </button>
               </div>
             </div>
-            <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 min-h-[300px] shadow-inner">
+
+            <div className="bg-slate-900 border border-white/10 rounded-3xl p-8 min-h-[400px] shadow-inner relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
+                <Layout className="w-32 h-32" />
+              </div>
+              
               {selectedFiles.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-3 relative z-10">
                   {selectedFiles.map((name, i) => (
-                    <div key={i} className="bg-white/5 p-3 rounded-lg flex justify-between items-center group border border-white/5">
-                      <span className="text-sm truncate pr-4 font-mono">{name}</span>
-                      <button onClick={() => toggleSelect(name)} className="text-slate-500 hover:text-red-500 transition-colors"><X className="w-4 h-4" /></button>
+                    <div key={i} className="bg-white/5 p-4 rounded-xl flex justify-between items-center group border border-white/5 hover:border-indigo-500/30 transition-all">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-slate-500 font-mono">{(i + 1).toString().padStart(2, '0')}</span>
+                        <span className="text-sm font-medium font-mono text-slate-200">{name}</span>
+                      </div>
+                      <button onClick={() => toggleSelect(name)} className="text-slate-600 hover:text-red-500 transition-colors p-1"><X className="w-4 h-4" /></button>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-600 italic py-20">
-                  <List className="w-10 h-10 mb-2 opacity-10" />
-                  <p>Chưa có ảnh nào được chọn.</p>
+                <div className="h-full flex flex-col items-center justify-center text-slate-700 italic py-24">
+                  <List className="w-12 h-12 mb-4 opacity-10" />
+                  <p className="text-sm">Danh sách đang trống</p>
                 </div>
               )}
             </div>
@@ -369,10 +243,15 @@ const App: React.FC = () => {
       </main>
 
       {viewMode === 'client' && selectedFiles.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-50">
-          <button onClick={() => setViewMode('admin')} className="w-full bg-indigo-600 py-4 rounded-2xl shadow-2xl font-black flex items-center justify-between px-8 border border-white/10 hover:bg-indigo-500 transition-all active:scale-95 text-white">
-            <span className="text-white font-bold">Đã chọn {selectedFiles.length} ảnh</span>
-            <div className="flex items-center gap-2 text-white">Xem danh sách <ArrowRight className="w-4 h-4" /></div>
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 w-full max-w-md px-6 z-50">
+          <button onClick={() => setViewMode('admin')} className="w-full bg-indigo-600 py-4 rounded-2xl shadow-2xl font-bold flex items-center justify-between px-8 border border-white/20 hover:bg-indigo-500 transition-all active:scale-95 text-white group">
+            <div className="flex items-center gap-3">
+              <div className="bg-white/20 px-2 py-0.5 rounded-lg text-xs">{selectedFiles.length}</div>
+              <span className="text-white">Ảnh đã chọn</span>
+            </div>
+            <div className="flex items-center gap-2 text-white/80 text-sm group-hover:text-white">
+              Gửi thợ ảnh <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+            </div>
           </button>
         </div>
       )}
