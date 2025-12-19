@@ -54,19 +54,37 @@ const App: React.FC = () => {
   const [copied, setCopied] = useState<boolean>(false);
   const [isKeySelected, setIsKeySelected] = useState<boolean>(true);
 
+  // Kiểm tra an toàn window.aistudio
   useEffect(() => {
     const checkKey = async () => {
-      // @ts-ignore
-      const hasKey = await window.aistudio.hasSelectedApiKey();
-      setIsKeySelected(hasKey);
+      try {
+        // @ts-ignore
+        if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
+          // @ts-ignore
+          const hasKey = await window.aistudio.hasSelectedApiKey();
+          setIsKeySelected(hasKey);
+        } else {
+          // Nếu chạy ngoài môi trường Studio (như Vercel), mặc định cho phép hiện UI
+          // nhưng việc gọi API sẽ phụ thuộc vào biến môi trường API_KEY
+          setIsKeySelected(true);
+        }
+      } catch (e) {
+        console.warn("AI Studio API not available", e);
+        setIsKeySelected(true);
+      }
     };
     checkKey();
   }, []);
 
   const handleOpenSelectKey = async () => {
     // @ts-ignore
-    await window.aistudio.openSelectKey();
-    setIsKeySelected(true);
+    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+      // @ts-ignore
+      await window.aistudio.openSelectKey();
+      setIsKeySelected(true);
+    } else {
+      alert("Tính năng này chỉ khả dụng khi chạy trong môi trường Google AI Studio.");
+    }
   };
 
   useEffect(() => {
@@ -122,7 +140,7 @@ const App: React.FC = () => {
             <Camera className="w-10 h-10 text-white" />
           </div>
           <div className="space-y-2">
-            <h2 className="text-3xl font-black">LensSelect</h2>
+            <h2 className="text-3xl font-black text-white">LensSelect</h2>
             <p className="text-slate-400">Vui lòng chọn API Key từ một dự án đã bật Billing để bắt đầu.</p>
           </div>
           <button onClick={handleOpenSelectKey} className="w-full bg-white text-slate-950 font-black py-4 rounded-2xl hover:bg-slate-200 transition-all">
@@ -159,10 +177,10 @@ const App: React.FC = () => {
                   onChange={(e) => setFolderIdInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleLoadFiles(folderIdInput)}
                   placeholder="Dán link thư mục Google Drive..."
-                  className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                  className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-white"
                 />
-                <button onClick={() => handleLoadFiles(folderIdInput)} className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center">
-                  {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <ArrowRight className="w-5 h-5" />}
+                <button onClick={() => handleLoadFiles(folderIdInput)} className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center hover:bg-indigo-500 transition-colors">
+                  {loading ? <Loader2 className="animate-spin w-5 h-5 text-white" /> : <ArrowRight className="w-5 h-5 text-white" />}
                 </button>
               </div>
               
@@ -174,9 +192,9 @@ const App: React.FC = () => {
                   </div>
                   {error.includes("403") && (
                     <div className="pt-2 border-t border-red-500/10 space-y-3">
-                      <p className="text-xs text-slate-500">Bạn cần nhấn vào nút "Configurer la facturation" (như trong ảnh bạn gửi) trên Google Cloud Console để kích hoạt tính năng Search của Gemini.</p>
-                      <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" className="inline-flex items-center gap-2 text-xs font-bold text-indigo-400 hover:underline">
-                        Đi tới Google Cloud Console <ExternalLink className="w-3 h-3" />
+                      <p className="text-xs text-slate-500 italic">Mẹo: Bạn cần thẻ thanh toán quốc tế (Visa/Mastercard) để bật Billing trên Google Cloud Console. Dù miễn phí nhưng họ vẫn yêu cầu xác thực.</p>
+                      <a href="https://console.cloud.google.com/billing" target="_blank" className="inline-flex items-center gap-2 text-xs font-bold text-indigo-400 hover:underline">
+                        Thiết lập Billing ngay <ExternalLink className="w-3 h-3" />
                       </a>
                     </div>
                   )}
@@ -189,31 +207,49 @@ const App: React.FC = () => {
                 <PhotoCard key={file.id} file={file} isSelected={selectedFiles.includes(file.name)} onToggle={toggleSelect} />
               ))}
             </div>
+
+            {!loading && files.length === 0 && !error && (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-700">
+                <Share2 className="w-16 h-16 mb-4 opacity-20" />
+                <p>Nhập Link Google Drive để bắt đầu chọn ảnh</p>
+              </div>
+            )}
           </div>
         ) : (
-          <div className="max-w-3xl mx-auto space-y-8">
+          <div className="max-w-3xl mx-auto space-y-8 animate-in fade-in duration-500">
             <div className="flex justify-between items-end">
               <div>
                 <h2 className="text-3xl font-black">Danh sách chọn</h2>
                 <p className="text-slate-400">Đã chọn {selectedFiles.length} ảnh.</p>
               </div>
-              <button onClick={copyForPhotographer} className="bg-indigo-600 px-6 py-3 rounded-xl font-bold flex items-center gap-2">
-                {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                {copied ? "Đã copy!" : "Copy cho thợ ảnh"}
-              </button>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => window.confirm("Xóa toàn bộ danh sách?") && setSelectedFiles([])}
+                  className="bg-white/5 border border-white/10 px-4 py-3 rounded-xl hover:bg-red-500/10 hover:text-red-400 transition-all"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+                <button onClick={copyForPhotographer} className="bg-indigo-600 px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-600/20">
+                  {copied ? <Check className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4 text-white" />}
+                  <span className="text-white">{copied ? "Đã copy!" : "Copy cho thợ ảnh"}</span>
+                </button>
+              </div>
             </div>
-            <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 min-h-[300px]">
+            <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 min-h-[300px] shadow-inner">
               {selectedFiles.length > 0 ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {selectedFiles.map((name, i) => (
-                    <div key={i} className="bg-white/5 p-3 rounded-lg flex justify-between items-center group">
-                      <span className="text-sm truncate">{name}</span>
-                      <button onClick={() => toggleSelect(name)} className="text-slate-500 hover:text-red-500"><X className="w-4 h-4" /></button>
+                    <div key={i} className="bg-white/5 p-3 rounded-lg flex justify-between items-center group border border-white/5">
+                      <span className="text-sm truncate pr-4">{name}</span>
+                      <button onClick={() => toggleSelect(name)} className="text-slate-500 hover:text-red-500 transition-colors"><X className="w-4 h-4" /></button>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="h-full flex items-center justify-center text-slate-600 italic">Chưa có ảnh nào được chọn.</div>
+                <div className="h-full flex flex-col items-center justify-center text-slate-600 italic py-20">
+                  <List className="w-10 h-10 mb-2 opacity-10" />
+                  <p>Chưa có ảnh nào được chọn.</p>
+                </div>
               )}
             </div>
           </div>
@@ -221,10 +257,10 @@ const App: React.FC = () => {
       </main>
 
       {viewMode === 'client' && selectedFiles.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4">
-          <button onClick={() => setViewMode('admin')} className="w-full bg-indigo-600 py-4 rounded-2xl shadow-2xl font-black flex items-center justify-between px-8 border border-white/10">
-            <span>Đã chọn {selectedFiles.length} ảnh</span>
-            <div className="flex items-center gap-2">Xem danh sách <ArrowRight className="w-4 h-4" /></div>
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-full max-w-md px-4 z-50">
+          <button onClick={() => setViewMode('admin')} className="w-full bg-indigo-600 py-4 rounded-2xl shadow-2xl font-black flex items-center justify-between px-8 border border-white/10 hover:bg-indigo-500 transition-all active:scale-95 text-white">
+            <span className="text-white">Đã chọn {selectedFiles.length} ảnh</span>
+            <div className="flex items-center gap-2 text-white">Xem danh sách <ArrowRight className="w-4 h-4" /></div>
           </button>
         </div>
       )}
