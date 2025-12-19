@@ -20,13 +20,16 @@ export const extractFolderId = (input: string): string => {
 
 /**
  * Sử dụng Gemini 3 Flash để lấy danh sách file.
- * Model Flash có giới hạn miễn phí rộng rãi hơn Pro.
  */
 export const fetchDriveFilesViaGemini = async (folderId: string): Promise<{files: GoogleDriveFile[], sources: any[]}> => {
-  const cleanId = extractFolderId(folderId);
+  const apiKey = process.env.API_KEY;
   
-  // Khởi tạo instance mới mỗi lần gọi để đảm bảo dùng Key mới nhất từ window.aistudio
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  if (!apiKey || apiKey === "undefined" || apiKey.length < 10) {
+    throw new Error("THIẾU API KEY: Vui lòng cấu hình biến môi trường 'API_KEY' trong cài đặt dự án (Vercel) hoặc chọn Key trong Google AI Studio.");
+  }
+
+  const cleanId = extractFolderId(folderId);
+  const ai = new GoogleGenAI({ apiKey: apiKey });
   
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
@@ -35,14 +38,13 @@ export const fetchDriveFilesViaGemini = async (folderId: string): Promise<{files
     Định dạng trả về chính xác: ID: [file_id], Name: [file_name].`,
     config: {
       tools: [{ googleSearch: {} }],
-      temperature: 0.1, // Giảm độ sáng tạo để lấy dữ liệu chính xác hơn
+      temperature: 0.1,
     },
   });
 
   const text = response.text || "";
   const files: GoogleDriveFile[] = [];
   
-  // Trích xuất ID và Name
   const regex = /ID:\s*([a-zA-Z0-9_-]{25,})[\s,]+Name:\s*([^\n\r]+)/gi;
   let match;
   while ((match = regex.exec(text)) !== null) {

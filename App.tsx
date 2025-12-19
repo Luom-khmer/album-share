@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key } from 'lucide-react';
 import { ViewMode, GoogleDriveFile } from './types';
 import { fetchDriveFilesViaGemini, getDriveImageUrl, extractFolderId } from './services/driveService';
 
@@ -22,7 +22,7 @@ const PhotoCard: React.FC<PhotoCardProps> = ({ file, isSelected, onToggle }) => 
         onError={(e) => (e.currentTarget.src = 'https://via.placeholder.com/400x600?text=Private+Image')}
       />
       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
-        <span className="text-xs font-medium text-white/90 truncate drop-shadow-md">{file.name}</span>
+        <span className="text-xs font-medium text-white/90 truncate drop-shadow-md font-sans">{file.name}</span>
       </div>
       <button
         onClick={() => onToggle(file.name)}
@@ -54,7 +54,6 @@ const App: React.FC = () => {
   const [copied, setCopied] = useState<boolean>(false);
   const [isKeySelected, setIsKeySelected] = useState<boolean>(true);
 
-  // Kiểm tra an toàn window.aistudio
   useEffect(() => {
     const checkKey = async () => {
       try {
@@ -63,14 +62,9 @@ const App: React.FC = () => {
           // @ts-ignore
           const hasKey = await window.aistudio.hasSelectedApiKey();
           setIsKeySelected(hasKey);
-        } else {
-          // Nếu chạy ngoài môi trường Studio (như Vercel), mặc định cho phép hiện UI
-          // nhưng việc gọi API sẽ phụ thuộc vào biến môi trường API_KEY
-          setIsKeySelected(true);
         }
       } catch (e) {
-        console.warn("AI Studio API not available", e);
-        setIsKeySelected(true);
+        console.warn("AI Studio context not found");
       }
     };
     checkKey();
@@ -83,7 +77,7 @@ const App: React.FC = () => {
       await window.aistudio.openSelectKey();
       setIsKeySelected(true);
     } else {
-      alert("Tính năng này chỉ khả dụng khi chạy trong môi trường Google AI Studio.");
+      window.open("https://aistudio.google.com/app/apikey", "_blank");
     }
   };
 
@@ -105,12 +99,14 @@ const App: React.FC = () => {
       const { files: driveFiles } = await fetchDriveFilesViaGemini(id);
       setFiles(driveFiles);
       window.location.hash = id;
-      if (driveFiles.length === 0) setError("Không tìm thấy ảnh. Hãy chắc chắn thư mục đã được bật 'Bất kỳ ai có liên kết đều có thể xem'.");
     } catch (err: any) {
-      if (err.message?.includes("PERMISSION_DENIED")) {
-        setError("Lỗi 403: API Key của bạn chưa bật Thanh toán (Billing). Vui lòng nhấn 'Cấu hình thanh toán' trong Google Cloud Console.");
+      const msg = err.message || "";
+      if (msg.includes("THIẾU API KEY")) {
+        setError("Chưa cấu hình API Key. Nếu bạn đang dùng Vercel, hãy thêm biến 'API_KEY' vào Environment Variables.");
+      } else if (msg.includes("403")) {
+        setError("Lỗi 403: API Key của bạn cần được bật thanh toán (Billing) trên Google Cloud.");
       } else {
-        setError("Lỗi: " + (err.message || "Không thể truy cập thư mục."));
+        setError(msg);
       }
     } finally {
       setLoading(false);
@@ -137,14 +133,14 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
         <div className="max-w-md space-y-6">
           <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-indigo-600/20 rotate-12">
-            <Camera className="w-10 h-10 text-white" />
+            <Key className="w-10 h-10 text-white" />
           </div>
           <div className="space-y-2">
-            <h2 className="text-3xl font-black text-white">LensSelect</h2>
-            <p className="text-slate-400">Vui lòng chọn API Key từ một dự án đã bật Billing để bắt đầu.</p>
+            <h2 className="text-3xl font-black text-white">Thiếu Kết Nối</h2>
+            <p className="text-slate-400">Ứng dụng cần API Key để quét hình ảnh từ Drive qua AI.</p>
           </div>
-          <button onClick={handleOpenSelectKey} className="w-full bg-white text-slate-950 font-black py-4 rounded-2xl hover:bg-slate-200 transition-all">
-            Kết nối Google AI Studio
+          <button onClick={handleOpenSelectKey} className="w-full bg-white text-slate-950 font-black py-4 rounded-2xl hover:bg-slate-200 transition-all shadow-xl">
+            Cài đặt API Key
           </button>
         </div>
       </div>
@@ -169,7 +165,7 @@ const App: React.FC = () => {
         {viewMode === 'client' ? (
           <div className="space-y-12">
             <div className="max-w-xl mx-auto text-center space-y-6">
-              <h2 className="text-4xl font-black tracking-tight">Thư viện của bạn</h2>
+              <h2 className="text-4xl font-black tracking-tight font-sans">Thư viện của bạn</h2>
               <div className="relative group">
                 <input
                   type="text"
@@ -177,27 +173,30 @@ const App: React.FC = () => {
                   onChange={(e) => setFolderIdInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleLoadFiles(folderIdInput)}
                   placeholder="Dán link thư mục Google Drive..."
-                  className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-white"
+                  className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 focus:ring-2 focus:ring-indigo-500 outline-none transition-all text-white placeholder:text-slate-600"
                 />
-                <button onClick={() => handleLoadFiles(folderIdInput)} className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center hover:bg-indigo-500 transition-colors">
+                <button onClick={() => handleLoadFiles(folderIdInput)} className="absolute right-2 top-2 bottom-2 aspect-square bg-indigo-600 rounded-xl flex items-center justify-center hover:bg-indigo-500 transition-colors shadow-lg">
                   {loading ? <Loader2 className="animate-spin w-5 h-5 text-white" /> : <ArrowRight className="w-5 h-5 text-white" />}
                 </button>
               </div>
               
               {error && (
-                <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl text-left space-y-4">
+                <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl text-left space-y-4 animate-in fade-in zoom-in-95">
                   <div className="flex gap-3 text-red-400">
                     <AlertTriangle className="w-6 h-6 shrink-0" />
-                    <p className="text-sm leading-relaxed font-medium">{error}</p>
-                  </div>
-                  {error.includes("403") && (
-                    <div className="pt-2 border-t border-red-500/10 space-y-3">
-                      <p className="text-xs text-slate-500 italic">Mẹo: Bạn cần thẻ thanh toán quốc tế (Visa/Mastercard) để bật Billing trên Google Cloud Console. Dù miễn phí nhưng họ vẫn yêu cầu xác thực.</p>
-                      <a href="https://console.cloud.google.com/billing" target="_blank" className="inline-flex items-center gap-2 text-xs font-bold text-indigo-400 hover:underline">
-                        Thiết lập Billing ngay <ExternalLink className="w-3 h-3" />
-                      </a>
+                    <div>
+                       <p className="text-sm font-bold mb-1">Cần chú ý:</p>
+                       <p className="text-sm leading-relaxed opacity-90">{error}</p>
                     </div>
-                  )}
+                  </div>
+                  <div className="pt-3 border-t border-red-500/10 flex flex-wrap gap-3">
+                    <a href="https://vercel.com/dashboard" target="_blank" className="text-xs bg-red-500/20 px-3 py-1.5 rounded-lg hover:bg-red-500/30 transition-all font-bold flex items-center gap-1">
+                      <ExternalLink className="w-3 h-3" /> Dashboard Vercel
+                    </a>
+                    <button onClick={handleOpenSelectKey} className="text-xs bg-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-lg hover:bg-indigo-500/30 transition-all font-bold">
+                      Lấy API Key mới
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -210,8 +209,8 @@ const App: React.FC = () => {
 
             {!loading && files.length === 0 && !error && (
               <div className="flex flex-col items-center justify-center py-20 text-slate-700">
-                <Share2 className="w-16 h-16 mb-4 opacity-20" />
-                <p>Nhập Link Google Drive để bắt đầu chọn ảnh</p>
+                <Share2 className="w-16 h-16 mb-4 opacity-10" />
+                <p className="font-medium">Nhập Link Google Drive để bắt đầu chọn ảnh</p>
               </div>
             )}
           </div>
@@ -240,7 +239,7 @@ const App: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {selectedFiles.map((name, i) => (
                     <div key={i} className="bg-white/5 p-3 rounded-lg flex justify-between items-center group border border-white/5">
-                      <span className="text-sm truncate pr-4">{name}</span>
+                      <span className="text-sm truncate pr-4 font-mono">{name}</span>
                       <button onClick={() => toggleSelect(name)} className="text-slate-500 hover:text-red-500 transition-colors"><X className="w-4 h-4" /></button>
                     </div>
                   ))}
