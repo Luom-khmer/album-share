@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { GoogleDriveFile } from '../types';
 
 /**
@@ -20,12 +20,13 @@ export const extractFolderId = (input: string): string => {
 
 /**
  * Sử dụng Gemini 3 Flash để lấy danh sách file.
+ * Chấp nhận apiKey truyền từ UI hoặc fallback về process.env.
  */
-export const fetchDriveFilesViaGemini = async (folderId: string): Promise<{files: GoogleDriveFile[], sources: any[]}> => {
-  const apiKey = process.env.API_KEY;
+export const fetchDriveFilesViaGemini = async (folderId: string, customApiKey?: string): Promise<{files: GoogleDriveFile[], sources: any[]}> => {
+  const apiKey = customApiKey || process.env.API_KEY;
   
   if (!apiKey || apiKey === "undefined" || apiKey.length < 10) {
-    throw new Error("THIẾU API KEY: Vui lòng cấu hình biến môi trường 'API_KEY' trong cài đặt dự án (Vercel) hoặc chọn Key trong Google AI Studio.");
+    throw new Error("THIẾU API KEY: Vui lòng nhập API Key của bạn trong phần cài đặt (biểu tượng chìa khóa).");
   }
 
   const cleanId = extractFolderId(folderId);

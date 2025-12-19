@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key } from 'lucide-react';
+import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key, Save } from 'lucide-react';
 import { ViewMode, GoogleDriveFile } from './types';
 import { fetchDriveFilesViaGemini, getDriveImageUrl, extractFolderId } from './services/driveService';
 
@@ -52,59 +52,55 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [copied, setCopied] = useState<boolean>(false);
-  const [isKeySelected, setIsKeySelected] = useState<boolean>(true);
+  
+  // API Key State
+  const [userApiKey, setUserApiKey] = useState<string>('');
+  const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
 
+  // Load Key from LocalStorage on mount
   useEffect(() => {
-    const checkKey = async () => {
-      try {
-        // @ts-ignore
-        if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-          // @ts-ignore
-          const hasKey = await window.aistudio.hasSelectedApiKey();
-          setIsKeySelected(hasKey);
-        }
-      } catch (e) {
-        console.warn("AI Studio context not found");
-      }
-    };
-    checkKey();
+    const savedKey = localStorage.getItem('user_gemini_api_key');
+    if (savedKey) setUserApiKey(savedKey);
+    
+    const savedSelected = localStorage.getItem('selected_filenames');
+    if (savedSelected) setSelectedFiles(JSON.parse(savedSelected));
   }, []);
 
-  const handleOpenSelectKey = async () => {
-    // @ts-ignore
-    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-      // @ts-ignore
-      await window.aistudio.openSelectKey();
-      setIsKeySelected(true);
-    } else {
-      window.open("https://aistudio.google.com/app/apikey", "_blank");
-    }
-  };
-
-  useEffect(() => {
-    const saved = localStorage.getItem('selected_filenames');
-    if (saved) setSelectedFiles(JSON.parse(saved));
-  }, []);
-
+  // Save selection
   useEffect(() => {
     localStorage.setItem('selected_filenames', JSON.stringify(selectedFiles));
   }, [selectedFiles]);
 
+  const saveApiKey = (key: string) => {
+    const cleanKey = key.trim();
+    localStorage.setItem('user_gemini_api_key', cleanKey);
+    setUserApiKey(cleanKey);
+    setShowKeyModal(false);
+    setError(null);
+  };
+
   const handleLoadFiles = async (input: string) => {
     const id = extractFolderId(input);
     if (!id) return;
+    
+    if (!userApiKey && !process.env.API_KEY) {
+      setShowKeyModal(true);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const { files: driveFiles } = await fetchDriveFilesViaGemini(id);
+      const { files: driveFiles } = await fetchDriveFilesViaGemini(id, userApiKey);
       setFiles(driveFiles);
       window.location.hash = id;
     } catch (err: any) {
       const msg = err.message || "";
-      if (msg.includes("THIẾU API KEY")) {
-        setError("Chưa cấu hình API Key. Nếu bạn đang dùng Vercel, hãy thêm biến 'API_KEY' vào Environment Variables.");
+      if (msg.includes("API KEY")) {
+        setError("Vui lòng nhập API Key để ứng dụng có thể quét ảnh từ Drive.");
+        setShowKeyModal(true);
       } else if (msg.includes("403")) {
-        setError("Lỗi 403: API Key của bạn cần được bật thanh toán (Billing) trên Google Cloud.");
+        setError("Lỗi 403: API Key của bạn cần được bật thanh toán (Billing) trên Google Cloud Console.");
       } else {
         setError(msg);
       }
@@ -128,27 +124,54 @@ const App: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  if (!isKeySelected) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-center">
-        <div className="max-w-md space-y-6">
-          <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-2xl shadow-indigo-600/20 rotate-12">
-            <Key className="w-10 h-10 text-white" />
-          </div>
-          <div className="space-y-2">
-            <h2 className="text-3xl font-black text-white">Thiếu Kết Nối</h2>
-            <p className="text-slate-400">Ứng dụng cần API Key để quét hình ảnh từ Drive qua AI.</p>
-          </div>
-          <button onClick={handleOpenSelectKey} className="w-full bg-white text-slate-950 font-black py-4 rounded-2xl hover:bg-slate-200 transition-all shadow-xl">
-            Cài đặt API Key
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const isKeyReady = userApiKey || process.env.API_KEY;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-indigo-500/30">
+      {/* API Key Modal */}
+      {showKeyModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-slate-900 border border-white/10 w-full max-w-md rounded-3xl p-8 shadow-2xl space-y-6">
+            <div className="flex justify-between items-start">
+              <div className="bg-indigo-600/20 p-3 rounded-2xl">
+                <Key className="w-6 h-6 text-indigo-400" />
+              </div>
+              <button onClick={() => setShowKeyModal(false)} className="text-slate-500 hover:text-white transition-colors">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold">Cấu hình API Key</h3>
+              <p className="text-sm text-slate-400">Nhập mã khóa Google Gemini để sử dụng tính năng quét Drive. Key được lưu an toàn tại trình duyệt của bạn.</p>
+            </div>
+            <div className="space-y-4">
+              <input
+                type="password"
+                placeholder="Dán API Key của bạn tại đây..."
+                value={userApiKey}
+                onChange={(e) => setUserApiKey(e.target.value)}
+                className="w-full bg-slate-950 border border-white/10 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-mono text-sm"
+              />
+              <div className="flex flex-col gap-2">
+                <button 
+                  onClick={() => saveApiKey(userApiKey)}
+                  className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> Lưu cấu hình
+                </button>
+                <a 
+                  href="https://aistudio.google.com/app/apikey" 
+                  target="_blank" 
+                  className="text-center text-xs text-indigo-400 hover:underline flex items-center justify-center gap-1"
+                >
+                  Lấy API Key miễn phí <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-xl border-b border-white/5 px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Camera className="text-indigo-500 w-6 h-6" />
@@ -158,7 +181,13 @@ const App: React.FC = () => {
           <button onClick={() => setViewMode('client')} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${viewMode === 'client' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Khách hàng</button>
           <button onClick={() => setViewMode('admin')} className={`px-5 py-1.5 rounded-full text-sm font-medium transition-all ${viewMode === 'admin' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Thợ ảnh</button>
         </nav>
-        <div className="w-10 h-10" />
+        <button 
+          onClick={() => setShowKeyModal(true)} 
+          className={`p-2 rounded-xl transition-all border ${userApiKey ? 'bg-indigo-600/10 border-indigo-500/30 text-indigo-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}
+          title="Thiết lập API Key"
+        >
+          <Key className="w-5 h-5" />
+        </button>
       </header>
 
       <main className="container mx-auto px-4 py-8 max-w-7xl flex-1 mb-24">
@@ -166,6 +195,20 @@ const App: React.FC = () => {
           <div className="space-y-12">
             <div className="max-w-xl mx-auto text-center space-y-6">
               <h2 className="text-4xl font-black tracking-tight font-sans">Thư viện của bạn</h2>
+              
+              {!isKeyReady && (
+                <div className="p-6 bg-indigo-600/10 border border-indigo-500/20 rounded-3xl space-y-4 animate-in slide-in-from-top duration-500">
+                  <div className="flex items-center justify-center gap-3 text-indigo-400">
+                    <Info className="w-6 h-6" />
+                    <p className="font-bold">Ứng dụng cần API Key để hoạt động</p>
+                  </div>
+                  <p className="text-sm text-slate-400">Vui lòng nhập API Key để chúng tôi có thể tự động quét và hiển thị hình ảnh từ thư mục Google Drive của bạn.</p>
+                  <button onClick={() => setShowKeyModal(true)} className="bg-indigo-600 px-6 py-2 rounded-xl font-bold hover:bg-indigo-500 transition-all">
+                    Nhập API Key ngay
+                  </button>
+                </div>
+              )}
+
               <div className="relative group">
                 <input
                   type="text"
@@ -189,14 +232,14 @@ const App: React.FC = () => {
                        <p className="text-sm leading-relaxed opacity-90">{error}</p>
                     </div>
                   </div>
-                  <div className="pt-3 border-t border-red-500/10 flex flex-wrap gap-3">
-                    <a href="https://vercel.com/dashboard" target="_blank" className="text-xs bg-red-500/20 px-3 py-1.5 rounded-lg hover:bg-red-500/30 transition-all font-bold flex items-center gap-1">
-                      <ExternalLink className="w-3 h-3" /> Dashboard Vercel
-                    </a>
-                    <button onClick={handleOpenSelectKey} className="text-xs bg-indigo-500/20 text-indigo-400 px-3 py-1.5 rounded-lg hover:bg-indigo-500/30 transition-all font-bold">
-                      Lấy API Key mới
-                    </button>
-                  </div>
+                  {error.includes("403") && (
+                    <div className="pt-3 border-t border-red-500/10">
+                      <p className="text-xs text-slate-500 mb-2">Lưu ý: Bạn cần một API Key từ dự án Google Cloud đã được cấu hình thanh toán để sử dụng tính năng Search (dùng để quét thư mục).</p>
+                      <a href="https://console.cloud.google.com/billing" target="_blank" className="text-xs text-indigo-400 font-bold hover:underline flex items-center gap-1">
+                        Thiết lập Billing trên GCP <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
