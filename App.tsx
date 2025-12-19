@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key, Save } from 'lucide-react';
+import { Camera, Settings, Eye, Heart, Copy, Check, Info, Trash2, ArrowRight, Share2, Loader2, List, X, Lock, ExternalLink, AlertTriangle, Key, Save, Clock } from 'lucide-react';
 import { ViewMode, GoogleDriveFile } from './types';
 import { fetchDriveFilesViaGemini, getDriveImageUrl, extractFolderId } from './services/driveService';
 
@@ -49,7 +49,7 @@ const App: React.FC = () => {
   const [folderIdInput, setFolderIdInput] = useState<string>('');
   const [files, setFiles] = useState<GoogleDriveFile[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<React.ReactNode | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [copied, setCopied] = useState<boolean>(false);
   
@@ -96,7 +96,26 @@ const App: React.FC = () => {
       window.location.hash = id;
     } catch (err: any) {
       const msg = err.message || "";
-      if (msg.includes("API KEY")) {
+      console.error("API Error:", err);
+
+      if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED")) {
+        setError(
+          <div className="space-y-3">
+            <p className="font-bold text-red-400 flex items-center gap-2">
+              <Clock className="w-4 h-4" /> Hết lượt sử dụng (Quota Exceeded)
+            </p>
+            <p className="text-xs opacity-90 leading-relaxed">
+              Bạn đang dùng gói API miễn phí và đã vượt quá giới hạn yêu cầu/phút. 
+              Vui lòng **đợi khoảng 1-2 phút** rồi thử lại, hoặc nâng cấp lên gói trả phí trong Google AI Studio.
+            </p>
+            <div className="flex gap-3 pt-1">
+              <a href="https://aistudio.google.com/app/plan_management" target="_blank" className="text-[10px] bg-white/10 px-2 py-1 rounded hover:bg-white/20 transition-all font-bold">
+                Kiểm tra hạn mức
+              </a>
+            </div>
+          </div>
+        );
+      } else if (msg.includes("API KEY")) {
         setError("Vui lòng nhập API Key để ứng dụng có thể quét ảnh từ Drive.");
         setShowKeyModal(true);
       } else if (msg.includes("403")) {
@@ -227,12 +246,12 @@ const App: React.FC = () => {
                 <div className="p-5 bg-red-500/10 border border-red-500/20 rounded-2xl text-left space-y-4 animate-in fade-in zoom-in-95">
                   <div className="flex gap-3 text-red-400">
                     <AlertTriangle className="w-6 h-6 shrink-0" />
-                    <div>
+                    <div className="flex-1">
                        <p className="text-sm font-bold mb-1">Cần chú ý:</p>
-                       <p className="text-sm leading-relaxed opacity-90">{error}</p>
+                       <div className="text-sm leading-relaxed opacity-90">{error}</div>
                     </div>
                   </div>
-                  {error.includes("403") && (
+                  {typeof error === 'string' && error.includes("403") && (
                     <div className="pt-3 border-t border-red-500/10">
                       <p className="text-xs text-slate-500 mb-2">Lưu ý: Bạn cần một API Key từ dự án Google Cloud đã được cấu hình thanh toán để sử dụng tính năng Search (dùng để quét thư mục).</p>
                       <a href="https://console.cloud.google.com/billing" target="_blank" className="text-xs text-indigo-400 font-bold hover:underline flex items-center gap-1">
